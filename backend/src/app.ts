@@ -14,9 +14,26 @@ import { errorHandler } from './middleware/error.middleware';
 
 export const app = express();
 
+// Trust reverse proxy (Render, Heroku, etc.) so secure cookies work behind SSL terminators
+app.set('trust proxy', 1);
+
+// Normalize frontend URL and allow Vercel origins
+const allowedFrontendUrl = config.frontendUrl.replace(/\/$/, '');
+
 app.use(
   cors({
-    origin: config.frontendUrl,
+    origin: (requestOrigin, callback) => {
+      if (!requestOrigin) return callback(null, true);
+      const cleanOrigin = requestOrigin.replace(/\/$/, '');
+      if (
+        cleanOrigin === allowedFrontendUrl ||
+        cleanOrigin.endsWith('.vercel.app') ||
+        cleanOrigin.includes('localhost')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   })
 );
@@ -34,6 +51,9 @@ sessionRedisClient.on('error', (err) => {
 sessionRedisClient.connect().catch((err) => {
   console.error('[Session Redis] Connection failed:', err);
 });
+
+const isHttps = config.nodeEnv === 'production' || config.frontendUrl.startsWith('https://');
+
 app.use(
   session({
     store: new RedisStore({
@@ -45,8 +65,8 @@ app.use(
     cookie: {
       maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: true,
-      secure: config.nodeEnv === 'production',
-      sameSite: config.nodeEnv === 'production' ? 'none' : 'lax',
+      secure: isHttps,
+      sameSite: isHttps ? 'none' : 'lax',
     },
   })
 );
